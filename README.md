@@ -8,6 +8,8 @@ I use this as a workaround for the extremely limited way Instagram can post to T
 
 ## Deploying to AWS
 
+Make sure you edit all the environment variables in `template.yaml`. *You will have to register an application with both Tumblr and Twitter for this to work.*
+
 ```
 env GOOS=linux go build && zip tumblr2twitter.zip tumblr2twitter
 aws s3 mb s3://tumblr2twitter-artifacts
