@@ -1,0 +1,46 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/
+
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+
+Resources:
+
+  PeriodicFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: tumblr2twitter
+      CodeUri: ./tumblr2twitter.zip
+      Policies: AmazonDynamoDBFullAccess
+      Environment:
+        Variables: 
+          TUMBLR_BLOG_NAME:
+            "changeme"
+          TUMBLR_CONSUMER_KEY:
+            "changeme"
+          TUMBLR_CONSUMER_SECRET:
+            "changeme"
+          TWITTER_CONSUMER_KEY:
+            "changeme"
+          TWITTER_CONSUMER_SECRET:
+            "changeme"
+          TWITTER_ACCESS_TOKEN:
+            "changeme"
+          TWITTER_ACCESS_TOKEN_SECRET:
+            "changeme"
+          POSTS_TABLE_NAME: 
+            Ref: PostsTable
+      Runtime: go1.x
+      Events:
+        PeriodicTask:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+
+  PostsTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: ID
+        Type: Number
