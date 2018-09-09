@@ -15,11 +15,8 @@ import (
 	"strconv"
 
 	"github.com/ChimeraCoder/anaconda"
-	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/k3a/html2text"
+	"github.com/boltdb/bolt"
+	"github.com/st3fan/html2text"
 	"github.com/st3fan/tumblrclient"
 	tumblr "github.com/tumblr/tumblr.go"
 )
@@ -42,52 +39,42 @@ func postTweetWithMedia(twitter *anaconda.TwitterApi, status string, media anaco
 	return twitter.PostTweet(status, values)
 }
 
-func haveSeenPostBefore(ses *session.Session, ID int) (bool, error) {
-	ddb := dynamodb.New(ses, aws.NewConfig())
-
-	result, err := ddb.GetItem(&dynamodb.GetItemInput{
-		TableName: aws.String(os.Getenv("POSTS_TABLE_NAME")),
-		Key: map[string]*dynamodb.AttributeValue{
-			"ID": {N: aws.String(strconv.Itoa(int(ID)))},
-		},
+func haveSeenPostBefore(db *bolt.DB, ID int) (bool, error) {
+	seen := false
+	err := db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte("Posts"))
+		if bucket == nil {
+			return nil
+		}
+		seen = bucket.Get([]byte(strconv.Itoa(ID))) != nil
+		return nil
 	})
-
-	if err != nil {
-		return false, err
-	}
-
-	return len(result.Item) != 0, nil
+	return seen, err
 }
 
-func rememberPost(ses *session.Session, ID int, tweetURL string) error {
-	input := &dynamodb.PutItemInput{
-		Item: map[string]*dynamodb.AttributeValue{
-			"ID":       {N: aws.String(strconv.Itoa(int(ID)))},
-			"TweetURL": {S: aws.String(tweetURL)},
-		},
-		TableName: aws.String(os.Getenv("POSTS_TABLE_NAME")),
-	}
+func rememberPost(db *bolt.DB, ID int, tweetURL string) error {
+	return db.Update(func(tx *bolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists([]byte("Posts"))
+		if err != nil {
+			return err
+		}
+		return bucket.Put([]byte(strconv.Itoa(ID)), []byte(tweetURL))
+	})
 
-	ddb := dynamodb.New(ses, aws.NewConfig())
-
-	if _, err := ddb.PutItem(input); err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func handler() {
+	db, err := bolt.Open("/home/stefan/etc/tumblr2twitter.db", 0600, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
 	client := tumblrclient.NewClient(os.Getenv("TUMBLR_CONSUMER_KEY"), os.Getenv("TUMBLR_CONSUMER_SECRET"))
 	// TODO Verify that this works
 
 	twitter := anaconda.NewTwitterApiWithCredentials(os.Getenv("TWITTER_ACCESS_TOKEN"), os.Getenv("TWITTER_ACCESS_TOKEN_SECRET"), os.Getenv("TWITTER_CONSUMER_KEY"), os.Getenv("TWITTER_CONSUMER_SECRET"))
 	// TODO Verify that this works
-
-	ses, err := session.NewSession(&aws.Config{Region: aws.String("us-east-1")})
-	if err != nil {
-		log.Fatal("Failed to get AWS Session: ", err)
-	}
 
 	blog := client.GetBlog(os.Getenv("TUMBLR_BLOG_NAME"))
 	posts, err := blog.GetPosts(nil)
@@ -103,7 +90,7 @@ func handler() {
 			// We can currently only handle posts with one photo attached
 			if len(photoPost.Photos) == 1 {
 				// Check if we already posted this to Twitter
-				seenPostBefore, err := haveSeenPostBefore(ses, int(photoPost.Id))
+				seenPostBefore, err := haveSeenPostBefore(db, int(photoPost.Id))
 				if err != nil {
 					log.Printf("Failed to check if we have seen post before: %s\n", err)
 					continue
@@ -112,6 +99,13 @@ func handler() {
 				if seenPostBefore {
 					log.Printf("Seen post before, skipping")
 					continue
+				}
+
+				log.Printf("Not seen post before, going to post to Twitter")
+
+				// Even if the upload fails, we remember this as done
+				if err := rememberPost(db, int(photoPost.Id), ""); err != nil {
+					log.Printf("Failed to remember post: %s", err)
 				}
 
 				// Fetch the photo from Tumblr
@@ -136,17 +130,16 @@ func handler() {
 				}
 
 				tweetURL := fmt.Sprintf("https://twitter.com/%s/status/%s", tweet.User.ScreenName, tweet.IdStr)
-
-				log.Printf("Succesfully posted Tumblr post <%s> as tweet <%s>\n", photoPost.PostUrl, tweetURL)
-
-				if err := rememberPost(ses, int(photoPost.Id), tweetURL); err != nil {
+				if err := rememberPost(db, int(photoPost.Id), tweetURL); err != nil {
 					log.Printf("Failed to remember post: %s", err)
 				}
+
+				log.Printf("Succesfully posted Tumblr post <%s> as tweet <%s>\n", photoPost.PostUrl, tweetURL)
 			}
 		}
 	}
 }
 
 func main() {
-	lambda.Start(handler)
+	handler()
 }
