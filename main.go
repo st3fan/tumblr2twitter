@@ -12,7 +12,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/ChimeraCoder/anaconda"
 	"github.com/boltdb/bolt"
@@ -60,10 +62,14 @@ func rememberPost(db *bolt.DB, ID int, tweetURL string) error {
 		}
 		return bucket.Put([]byte(strconv.Itoa(ID)), []byte(tweetURL))
 	})
-
 }
 
-func handler() {
+func cleanupCaption(caption string) string {
+	re := regexp.MustCompile(`<a[^>]*>(.*?)</a>`)
+	return strings.TrimSpace(html2text.HTML2Text(re.ReplaceAllString(caption, "")))
+}
+
+func main() {
 	db, err := bolt.Open("/home/stefan/etc/tumblr2twitter.db", 0600, nil)
 	if err != nil {
 		log.Fatal(err)
@@ -123,7 +129,7 @@ func handler() {
 				}
 
 				// Post a tweet with the media we just uploaded
-				tweet, err := postTweetWithMedia(twitter, html2text.HTML2Text(photoPost.Caption), media)
+				tweet, err := postTweetWithMedia(twitter, cleanupCaption(photoPost.Caption), media)
 				if err != nil {
 					log.Printf("Failed to post tweet to Twitter: %s", err)
 					continue
@@ -138,8 +144,4 @@ func handler() {
 			}
 		}
 	}
-}
-
-func main() {
-	handler()
 }
