@@ -66,7 +66,9 @@ func rememberPost(db *bolt.DB, ID int, tweetURL string) error {
 
 func cleanupCaption(caption string) string {
 	re := regexp.MustCompile(`<a[^>]*>(.*?)</a>`)
-	return strings.TrimSpace(html2text.HTML2Text(re.ReplaceAllString(caption, "")))
+	caption = strings.TrimSpace(html2text.HTML2Text(re.ReplaceAllString(caption, "")))
+	caption = strings.ReplaceAll(caption, "&hellip;", "\U00002026")
+	return caption
 }
 
 func main() {
@@ -134,13 +136,13 @@ func main() {
 					log.Printf("Failed to post tweet to Twitter: %s", err)
 					continue
 				}
-
+				
 				tweetURL := fmt.Sprintf("https://twitter.com/%s/status/%s", tweet.User.ScreenName, tweet.IdStr)
+				log.Printf("Posted Tumblr post <%s> as tweet <%s>\n", photoPost.PostUrl, tweetURL)
+
 				if err := rememberPost(db, int(photoPost.Id), tweetURL); err != nil {
 					log.Printf("Failed to remember post: %s", err)
 				}
-
-				log.Printf("Succesfully posted Tumblr post <%s> as tweet <%s>\n", photoPost.PostUrl, tweetURL)
 			}
 		}
 	}
