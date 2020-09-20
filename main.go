@@ -87,62 +87,67 @@ func main() {
 	blog := client.GetBlog(os.Getenv("TUMBLR_BLOG_NAME"))
 	posts, err := blog.GetPosts(nil)
 	if err != nil {
-		log.Fatal("Failed to get Tumblr blog posts: ", err)
+		log.Fatal("[E] Failed to get Tumblr blog posts: ", err)
+		return
 	}
 
-	for i := 0; i < int(posts.TotalPosts); i++ {
+	for i := int(posts.TotalPosts) - 1; i >= 0; i-- {
 		post := posts.Get(uint(i))
 		if photoPost, ok := post.(*tumblr.PhotoPost); ok && photoPost != nil {
-			log.Printf("Looking at blog post <%d> at <%s>", photoPost.Id, photoPost.PostUrl)
+			log.Printf("[*] Looking at blog post <%d> at <%s>", photoPost.Id, photoPost.PostUrl)
 
 			// We can currently only handle posts with one photo attached
 			if len(photoPost.Photos) == 1 {
 				// Check if we already posted this to Twitter
 				seenPostBefore, err := haveSeenPostBefore(db, int(photoPost.Id))
 				if err != nil {
-					log.Printf("Failed to check if we have seen post before: %s\n", err)
-					continue
+					log.Printf("[E] Failed to check if we have seen post before: %s\n", err)
+					break
 				}
 
 				if seenPostBefore {
-					log.Printf("Seen post before, skipping")
+					log.Printf("[*] Seen post before, skipping")
 					continue
 				}
 
-				log.Printf("Not seen post before, going to post to Twitter")
+				log.Printf("[E] Not seen post before, going to post to Twitter")
 
 				// Even if the upload fails, we remember this as done
 				if err := rememberPost(db, int(photoPost.Id), ""); err != nil {
-					log.Printf("Failed to remember post: %s", err)
+					log.Printf("[E] Failed to remember post: %s", err)
+					break
 				}
 
 				// Fetch the photo from Tumblr
 				image, err := download(photoPost.Photos[0].OriginalSize.Url)
 				if err != nil {
-					log.Printf("Failed to download image from post <%d>: %s", photoPost.Id, err)
-					continue
+					log.Printf("[E] Failed to download image from post <%d>: %s", photoPost.Id, err)
+					break
 				}
 
 				// Upload the photo to Twitter
 				media, err := twitter.UploadMedia(base64.StdEncoding.EncodeToString(image))
 				if err != nil {
-					log.Printf("Failed to upload image to Twitter: %s", err)
-					continue
+					log.Printf("[E] Failed to upload image to Twitter: %s", err)
+					break
 				}
 
 				// Post a tweet with the media we just uploaded
 				tweet, err := postTweetWithMedia(twitter, cleanupCaption(photoPost.Caption), media)
 				if err != nil {
-					log.Printf("Failed to post tweet to Twitter: %s", err)
-					continue
+					log.Printf("[E] Failed to post tweet to Twitter: %s", err)
+					break
 				}
-				
+
 				tweetURL := fmt.Sprintf("https://twitter.com/%s/status/%s", tweet.User.ScreenName, tweet.IdStr)
-				log.Printf("Posted Tumblr post <%s> as tweet <%s>\n", photoPost.PostUrl, tweetURL)
+				log.Printf("[*] Posted Tumblr post <%s> as tweet <%s>\n", photoPost.PostUrl, tweetURL)
 
 				if err := rememberPost(db, int(photoPost.Id), tweetURL); err != nil {
-					log.Printf("Failed to remember post: %s", err)
+					log.Printf("[E] Failed to remember post: %s", err)
+					break
 				}
+
+				break // Only one photo is posted every run
 			}
 		}
 	}
